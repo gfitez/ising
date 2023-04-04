@@ -88,7 +88,7 @@ def set_input(cmd_line_args):
 
     inp['date_output'] = False
     inp['file_prefix'] = ''
-    inp['multiprocess'] = False
+    inp['multiprocess'] = True
     inp['skip_prog_print'] = False
 
     for x in cmd_line_args[1:]:
