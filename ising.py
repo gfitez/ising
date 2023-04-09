@@ -28,7 +28,13 @@ def make_B_generator(inp, t_final=None):
     
     default implementation: always return 0
     """
-    for val in range(inp['n_steps']):
+
+    n_slope = inp['n_steps'] - inp['n_burnin'] - inp['n_analyze']
+
+    for val in np.linspace(start=1, stop=0, num=n_slope):
+        yield val
+
+    for val in range(inp['n_steps']-n_slope):
         yield inp['B']
 
 def make_T_generator(inp, t_final):
@@ -90,6 +96,8 @@ def set_input(cmd_line_args):
     inp['file_prefix'] = ''
     inp['multiprocess'] = True
     inp['skip_prog_print'] = False
+
+    inp["use_gaussian"] = False
 
     for x in cmd_line_args[1:]:
         if ':' in x:
@@ -254,6 +262,12 @@ def plot_graphs(data): #T,E_mean,E_std,M_mean,M_std): #plot graphs at end
     plt.ylabel('Aveage Site Magnetization')
     plt.show()
 
+def dict_to_string(dict):
+    t_name=""
+    for key, val in dict.items():
+        t_name+=str(key)+":"+str(val)+" "
+    return t_name
+
 def get_filenames(inp): #make data folder if doesn't exist, then specify filename
     '''Generate the output file names for the EM (energy and megnetism) and SC (spin correlation) files'''
     try:
@@ -268,19 +282,25 @@ def get_filenames(inp): #make data folder if doesn't exist, then specify filenam
         # file name = [file_prefix]##_EM_v#.csv if only one temperature (example: runA_4.20_EM_v0.csv)
         #             [file_prefix]##T##_EM_v#.csv if there are two temperatures (example: runA_4.2T5.3_EM_v0.csv) 
         # the other file name is identical, but with "SC" (for spin correlation)) instead of EM
+        
+        
         if inp['t_max'] <= inp['t_min']:
             t_name = '%.2f'%inp['t_min']
         else:
             t_name = '%.2fT%.2f'%(inp['t_min'],inp['t_max'])
+        #t_name = dict_to_string(inp)
+        
+
 
         # print('%s%s_SC_v%i.csv'%(prefix,t_name,v))
         v = 0
         while (os.path.isfile( os.path.join(dir_out, '%s%s_EM_v%i.csv'%(prefix,t_name,v))) or
-               os.path.isfile( os.path.join(dir_out, '%s%s_SC_v%i.csv'%(prefix,t_name,v)))):
+            os.path.isfile( os.path.join(dir_out, '%s%s_SC_v%i.csv'%(prefix,t_name,v)))):
             v += 1
 
         return ( os.path.join(dir_out, '%s%s_EM_v%i.csv'%(prefix,t_name,v)),
-                 os.path.join(dir_out, '%s%s_SC_v%i.csv'%(prefix,t_name,v)) )
+                os.path.join(dir_out, '%s%s_SC_v%i.csv'%(prefix,t_name,v)) )
+    
 
     except:
         print ('fatal: Failed to make output file names')
@@ -308,11 +328,13 @@ def print_results(inp, data, corr):
         for entry in corr:
             writer.writerow(entry)
 
+    
+
 
 def run_indexed_process( inp, T, data_listener):
 # def run_simulation(
 #         temp, n, num_steps, num_burnin, num_analysis, flip_prop, j, b, data_filename, corr_filename, data_listener, corr_listener):
-    print("Starting Temp {0}".format(round(T,3)))
+    print("Starting temp {0}".format(round(T,3)))
     try:
         E, M, C = run_ising_lattice(inp, T, skip_print=True)
         data_listener.put(([T,E.mean(),E.std(), M.mean(), M.std()], [T,]+[x[1] for x in C]))
@@ -350,6 +372,10 @@ def listener(queue, inp, data):
         # print('--------\n',data)
 
 def make_T_array(inp):
+    if inp["use_gaussian"]:
+        trange=(inp["t_max"]-inp["t_min"])
+        return np.sort(np.random.normal(2.269,trange/5,int(trange/inp["t_step"])))
+
     if inp['t_max'] <= inp['t_min']:
         return [inp['t_min'],]
     else:
@@ -357,7 +383,7 @@ def make_T_array(inp):
 
 
 def run_multi_core(inp):
-    print("\n2D Ising Model Simulation; multi-core\n")
+    print("\n2D Ising Model Simulation; multi-cores\n")
     T_array = make_T_array(inp)
 
     #must use Manager queue here, or will not work
@@ -375,6 +401,7 @@ def run_multi_core(inp):
     data_watcher = pool.apply_async(listener, args=(data_listener, inp, data,))
     # corr_watcher = pool.apply_async(listener, args=(corr_listener, inp, corr,))
 
+    
     #fire off workers 
     jobs = [pool.apply_async(run_indexed_process,args=(inp,T, data_listener)) for T in T_array]
 
@@ -382,6 +409,7 @@ def run_multi_core(inp):
     [job.get() for job in jobs]
     data_listener.put('kill')
     pool.close()
+    return data
 
 def run_single_core(inp):
     print("\n2D Ising Model Simulation; single core\n")
