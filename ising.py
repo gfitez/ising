@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import multiprocessing as mp
 # from IsingLattice import IsingLattice as IsingLattice_c
 from sys import exit, argv
+import json, hashlib
 # from pandas import DataFrame
 # from tqdm import tqdm #fancy progress bar generator
 # from ising_c import run_ising #import run_ising function from ising.py
@@ -31,7 +32,7 @@ def make_B_generator(inp, t_final=None):
 
     n_slope = inp['n_steps'] - inp['n_burnin'] - inp['n_analyze']
 
-    for val in np.linspace(start=1, stop=0, num=n_slope):
+    for val in np.linspace(start=inp["B_top"], stop=inp["B"], num=n_slope):
         yield val
 
     for val in range(inp['n_steps']-n_slope):
@@ -98,6 +99,7 @@ def set_input(cmd_line_args):
     inp['skip_prog_print'] = False
 
     inp["use_gaussian"] = False
+    inp["B_top"] = 1
 
     for x in cmd_line_args[1:]:
         if ':' in x:
@@ -172,7 +174,7 @@ class check_progress(object):
         if final:
             print(self.fmt_print%(self.n_called, ratio*100., time_pass_str, 'done!'))
         else:
-            print(self.fmt_print%(self.n_called, ratio*100., time_pass_str, est_str), end='\r')
+            print(self.fmt_print%(self.n_called, ratio*100., time_pass_str, est_str), end ="\r")
 
         
 # def check_progress(inp):
@@ -288,7 +290,8 @@ def get_filenames(inp): #make data folder if doesn't exist, then specify filenam
             t_name = '%.2f'%inp['t_min']
         else:
             t_name = '%.2fT%.2f'%(inp['t_min'],inp['t_max'])
-        #t_name = dict_to_string(inp)
+
+        #t_name = hashlib.md5(json.dumps(inp, sort_keys=True).encode()).hexdigest()
         
 
 
@@ -334,12 +337,12 @@ def print_results(inp, data, corr):
 def run_indexed_process( inp, T, data_listener):
 # def run_simulation(
 #         temp, n, num_steps, num_burnin, num_analysis, flip_prop, j, b, data_filename, corr_filename, data_listener, corr_listener):
-    print("Starting temp {0}".format(round(T,3)))
+    #print("Starting temp {0}".format(round(T,3)))
     try:
-        E, M, C = run_ising_lattice(inp, T, skip_print=True)
+        E, M, C = run_ising_lattice(inp, T, skip_print=False)
         data_listener.put(([T,E.mean(),E.std(), M.mean(), M.std()], [T,]+[x[1] for x in C]))
         # corr_listener.put([T,]+[x[1] for x in C])
-        print("Finished Temp {0}".format(round(T,3)))
+        #print("Finished Temp {0}".format(round(T,3)))
         return True
 
     except KeyboardInterrupt:
@@ -374,7 +377,14 @@ def listener(queue, inp, data):
 def make_T_array(inp):
     if inp["use_gaussian"]:
         trange=(inp["t_max"]-inp["t_min"])
-        return np.sort(np.random.normal(2.269,trange/5,int(trange/inp["t_step"])))
+        numPoints = trange/inp["t_step"]
+
+        points= list(np.random.normal(2.269,trange/5,int(numPoints)))
+        points=[point for point in points if point>inp["t_min"] and point<inp["t_max"]]
+        while len(points)<numPoints:
+            points+=list(np.random.normal(2.269,trange/5,int(numPoints-len(points)+1)))
+            points=[point for point in points if point>inp["t_min"] and point<inp["t_max"]]
+        return np.sort(np.array(points))
 
     if inp['t_max'] <= inp['t_min']:
         return [inp['t_min'],]
