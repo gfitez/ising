@@ -7,6 +7,11 @@ import logging
 import numpy as np
 # import logging
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from matplotlib.animation import FuncAnimation
+from matplotlib import animation
+import time
+
 import multiprocessing as mp
 # from IsingLattice import IsingLattice as IsingLattice_c
 from sys import exit, argv
@@ -17,7 +22,7 @@ from sys import exit, argv
 # conditionally import python and C++ version of IsingLattice
 has_cpp = False
 from IsingLattice_python import IsingLattice as IsingLattice_py
-if os.path.isfile('ising_lattice_lib.so'):
+if os.path.isfile('ising_lattice_lib.dll'):
     has_cpp = True
     from IsingLattice_cpp    import IsingLattice as IsingLattice_cpp
 
@@ -73,7 +78,7 @@ def set_input(cmd_line_args):
     inp['t_max']      = 3.6    # maximum temperature
     inp['t_step']     = 0.1    # step size from min to max temperature
     inp['t_top']      = 4.0    # start temperature (arbitrary; feel free to change)
-    inp['N']          = 10     # sqrt(lattice size) (i.e. lattice = N^2 points
+    inp['N']          = 100    # sqrt(lattice size) (i.e. lattice = N^2 points
     inp['n_steps']    = 10000  # number of lattice steps in simulation
     inp['n_burnin']   = 2000   # optional parameter, used as naive default
     inp['n_analyze']  = 5000   # number of lattice steps at end of simulation calculated for averages and std.dev.
@@ -82,13 +87,16 @@ def set_input(cmd_line_args):
     inp['flip_perc']  = 0.1    # ratio of sites examined to flip in each step
     inp['dir_out']    = 'data' # output directory for file output
     inp['plots']      = False  # whether or not plots are generated
+    inp['plot_lattices'] = False #whether or nor plots of the spin lattice are generated
+    inp['make_vid'] = True     # whether or not an animation of the lattice is made
+    
                                
     inp['print_inp']  = False  # temperature option
     inp['use_cpp']    = True   # use 1 for True and 0 for False
 
     inp['date_output'] = False
     inp['file_prefix'] = ''
-    inp['multiprocess'] = False
+    inp['multiprocess'] = True
     inp['skip_prog_print'] = False
 
     for x in cmd_line_args[1:]:
@@ -220,12 +228,15 @@ def run_ising_lattice(inp, T_final, skip_print=False):
             progress.check()
         progress.check(True)
         spin_correlation = np.array(lattice.calc_auto_correlation())
+        
+        spinmatrix = lattice.get_numpy_spin_matrix()
 
         lattice.free_memory()
         return (
             np.array(E_avg),
             np.array(M_avg),
-            np.array(spin_correlation)
+            np.array(spin_correlation),
+            spinmatrix
         )
 
     except KeyboardInterrupt:
@@ -253,6 +264,46 @@ def plot_graphs(data): #T,E_mean,E_std,M_mean,M_std): #plot graphs at end
     plt.xlabel('Temperature')
     plt.ylabel('Aveage Site Magnetization')
     plt.show()
+    plt.close()
+
+    
+def plot_lattices(latt,name):
+    plt.imshow(latt[0],cmap=cm.Reds)
+    plt.axis('off')
+    plt.savefig(name+'_first_lattice.jpg')
+    plt.imshow(latt[-1],cmap=cm.Reds)
+    plt.axis('off')
+    plt.savefig(name+'_last_lattice.jpg')
+    plt.close()
+    
+def makevid(lattices,name,inp):
+    temps = make_T_array(inp)
+    fig, ax = plt.subplots()
+    a=lattices[0]
+    im=plt.imshow(a,interpolation='none')
+    ttl = ax.text(.5, 1.005, 'T='+str(temps[0]), transform = ax.transAxes)
+    plt.axis('off')
+
+
+    def init():
+        ttl.set_text('')
+        im.set_data(lattices[0])
+        return [im],[ttl]
+
+
+    def animate(i):
+        ttl.set_text('T='+str(temps[i]))
+        a=im.get_array()
+        a=lattices[i]   # exponential decay of the values
+        im.set_array(a)
+        return [im],[ttl]
+
+    anim = animation.FuncAnimation(fig, animate, init_func=init,
+                                   frames=len(lattices)-1, interval=100,)
+
+    anim.save(name+'lattice_animation.mp4', fps=15, extra_args=['-vcodec', 'libx264'])        
+    
+    
 
 def get_filenames(inp): #make data folder if doesn't exist, then specify filename
     '''Generate the output file names for the EM (energy and megnetism) and SC (spin correlation) files'''
@@ -286,8 +337,15 @@ def get_filenames(inp): #make data folder if doesn't exist, then specify filenam
         print ('fatal: Failed to make output file names')
         sys.exit()
 
-def print_results(inp, data, corr):
+def print_results(inp, data, corr,latt):
     data_filename, corr_filename = get_filenames(inp)
+    
+    np.save(data_filename+'_lattice',latt)
+    # print('num saved lattices: ', len(latt))
+    # plot_lattices(latt)
+    # print('finished plotting lattices')
+    
+    
     with open(data_filename,'w') as f_out:
         writer = csv.writer(f_out, delimiter=',', lineterminator='\n')
         writer.writerow(['N', 'n_steps', 'n_analyze', 'flip_perc'])
@@ -314,8 +372,8 @@ def run_indexed_process( inp, T, data_listener):
 #         temp, n, num_steps, num_burnin, num_analysis, flip_prop, j, b, data_filename, corr_filename, data_listener, corr_listener):
     print("Starting Temp {0}".format(round(T,3)))
     try:
-        E, M, C = run_ising_lattice(inp, T, skip_print=True)
-        data_listener.put(([T,E.mean(),E.std(), M.mean(), M.std()], [T,]+[x[1] for x in C]))
+        E, M, C, L = run_ising_lattice(inp, T, skip_print=True)
+        data_listener.put(([T,E.mean(),E.std(), M.mean(), M.std()], [T,]+[x[1] for x in C],L))
         # corr_listener.put([T,]+[x[1] for x in C])
         print("Finished Temp {0}".format(round(T,3)))
         return True
@@ -341,22 +399,35 @@ def listener(queue, inp, data):
         if message == 'kill':
             data['data'].sort()
             data['corr'].sort()
-            print_results(inp, data['data'], data['corr'])
+            try:
+                print_results(inp, data['data'], data['corr'],data['lattices'])
+            except:
+                logging.exception('Exception occurred: ')
+                raise
+            
+            # plot_lattices(data['lattices'])
+            # plt.imshow(data['lattices'][0])
+            # plt.savefig('mylittletestlatt.png')
+                
             print ('Closing listener')
             # print('killing')
             break
         data['data'].append(message[0])
         data['corr'].append(message[1])
+        data['lattices'].append(message[2])
+        
         # print('--------\n',data)
 
 def make_T_array(inp):
     if inp['t_max'] <= inp['t_min']:
         return [inp['t_min'],]
     else:
-        return np.arange(inp['t_min'], inp['t_max'], inp['t_step'])
+        # return np.arange(inp['t_min'], inp['t_max'], inp['t_step'])
+        return np.sort(np.random.normal(2.269,0.5,50))
 
 
 def run_multi_core(inp):
+    data_filename, corr_filename = get_filenames(inp)
     print("\n2D Ising Model Simulation; multi-core\n")
     T_array = make_T_array(inp)
 
@@ -368,7 +439,7 @@ def run_multi_core(inp):
 
 
     # arrays of results:
-    data = {'data':[], 'corr':[]}
+    data = {'data':[], 'corr':[],'lattices':[]}
     # corr = []
 
     #put listener to work first
@@ -382,21 +453,53 @@ def run_multi_core(inp):
     [job.get() for job in jobs]
     data_listener.put('kill')
     pool.close()
+    
+    
+    time.sleep(1)
+    with open(data_filename+'_lattice.npy', 'rb') as f:
+        lattices = np.load(f,allow_pickle=True)
+        
+        if inp['plot_lattices']:
+            print("\n Plotting snapshots of lattice \n")
+            plot_lattices(lattices,data_filename)
+        
+        if inp['make_vid']:
+            print("\n Making video of lattice \n")
+            makevid(lattices,data_filename,inp)
+
 
 def run_single_core(inp):
+    data_filename, corr_filename = get_filenames(inp)
     print("\n2D Ising Model Simulation; single core\n")
     # sequentially run through the desired temperatures and collect the output for each temperature
     data = []
     corr = []
+    lattices = []
     for temp in make_T_array(inp):
-        E, M, C = run_ising_lattice(inp, temp, skip_print=inp['skip_prog_print'])
+        E, M, C, L = run_ising_lattice(inp, temp, skip_print=inp['skip_prog_print'])
         data.append( (temp, E.mean(), E.std(), M.mean(), M.std() ) )
         corr.append([temp,]+[x[1] for x in C])
+        lattices.append(L)
 
-    print_results(inp, data, corr)
+    print_results(inp, data, corr,lattices)
+    
+    time.sleep(1)
+    with open(data_filename+'_lattice.npy', 'rb') as f:
+        lattices = np.load(f,allow_pickle=True)
+        
+        if inp['plot_lattices']:
+            print("\n Plotting snapshots of lattice \n")
+            plot_lattices(lattices,data_filename)
+        
+        if inp['make_vid']:
+            print("\n Making video of lattice \n")
+            makevid(lattices,data_filename,inp)
+
 
     if inp['plots']:
         plot_graphs(data)
+    
+    # plot_lattices(lattices)
 
 
 if __name__ == "__main__":
