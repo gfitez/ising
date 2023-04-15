@@ -313,6 +313,7 @@ def print_results(inp, data, corr):
     data_filename, corr_filename = get_filenames(inp)
     with open(data_filename,'w') as f_out:
         writer = csv.writer(f_out, delimiter=',', lineterminator='\n')
+        writer.writerow([str(inp)])
         writer.writerow(['N', 'n_steps', 'n_analyze', 'flip_perc'])
         writer.writerow([inp['N'], inp['n_steps'], inp['n_analyze'], inp['flip_perc']])
         writer.writerow([])
