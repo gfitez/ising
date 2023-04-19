@@ -24,4 +24,4 @@ Tc=2.269
 
 for i in range(100):
     print(i)
-    run({"t_step":0.01/3, "flip_perc":0.1, "N":100, "t_min":1.2, "t_max":3.2, "n_burnin":60000, "n_steps":100000, "t_top":4, "B_top":1, "use_gaussian":False})
+    run({"t_step":0.01/3, "flip_perc":0.1, "N":150, "t_min":1.2, "t_max":3.2, "n_burnin":120000, "n_steps":200000, "t_top":4, "B_top":1, "use_gaussian":False})
